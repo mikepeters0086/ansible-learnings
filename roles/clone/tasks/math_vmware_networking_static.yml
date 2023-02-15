@@ -1,0 +1,132 @@
+---
+- name: "math_vmware_networking_static: Build a list of production networks"
+  set_fact:
+    vmware_networking_list_of_networks: "{{ (vmware_networking_list_of_networks | default([])) + ['172.20.' + (item | string) + '.0/24'] }}"
+  loop: "{{ vmware_dvs_portgroup_list_of_vlans_static }}"
+  when: (item | int) < 1000
+
+- name: "math_vmware_networking_static: Build a list of non-production networks"
+  set_fact:
+    vmware_networking_list_of_networks: "{{ (vmware_networking_list_of_networks | default([])) + ['172.22.' + (((item | int) % 1000) | string) + '.0/24'] }}"
+  loop: "{{ vmware_dvs_portgroup_list_of_vlans_static }}"
+  when: (item | int) > 1000
+
+- name: debug vmware_networking_list_of_networks
+  debug:
+    msg: "{{ item }}"
+  loop: "{{ vmware_networking_list_of_networks }}"
+
+- name: "math_vmware_networking_static: Query Infoblox to get network utilization"
+  uri:
+    body_format: json
+    method: GET
+#    status_code: 200
+    url: "https://{{ nios_host }}/wapi/v2.7/network?network={{ item }}&_return_fields=network,utilization"
+    url_password: "{{ nios_pass }}"
+    url_username: "{{ nios_user }}"
+    validate_certs: no
+  check_mode: no
+  delegate_to: localhost
+  loop: "{{ vmware_networking_list_of_networks }}"
+  register: vmware_networking_static_ip_utilization
+
+- name: "math_vmware_networking_static: Pull out just the parts we need to query on"
+  set_fact:
+    vmware_networking_static_ip_utilization_trimmed: "{{ (vmware_networking_static_ip_utilization_trimmed | default([])) + [ item.json ] }}"
+  loop: "{{ vmware_networking_static_ip_utilization.results }}"
+
+- name: "math_vmware_networking_static: Find the most free network based on utilization"
+  set_fact:
+    vmware_networking_ideal_network: "{{ vmware_networking_static_ip_utilization_trimmed | flatten | sort(attribute='utilization') | first }}"
+
+- name: set fact to exclude IP addresses
+  set_fact:
+    nios_exclude_ips: "{{ vmware_networking_ideal_network.network[:-4] }}"
+
+- name: set fact to exclue IP addresses as a variable
+  set_fact:
+    ex_var: "['{{nios_exclude_ips}}1', '{{nios_exclude_ips}}2', '{{nios_exclude_ips}}3', '{{nios_exclude_ips}}4', '{{nios_exclude_ips}}5', '{{nios_exclude_ips}}6', '{{nios_exclude_ips}}7', '{{nios_exclude_ips}}8', '{{nios_exclude_ips}}9', '{{nios_exclude_ips}}10']"
+
+- name: "math_vmware_networking_static: Use the Infoblox lookup plugin to request the next available IP"
+  set_fact:
+    vmware_server_static_ip: "{{ lookup('infoblox.nios_modules.nios_next_ip', vmware_networking_ideal_network.network, num=1, exclude=ex_var, provider=nios_provider)[0] }}"
+
+- name: Debug to see list of IPs in vmware_server_static_ip
+  debug:
+    var: vmware_server_static_ip
+
+- name: Create host record in Infoblox
+  infoblox.nios_modules.nios_host_record:
+    name: "{{ hostname_calculated }}"
+    ipv4addrs:
+      - ipv4addr: "{{ lookup('infoblox.nios_modules.nios_next_ip', vmware_networking_ideal_network.network, num=1, exclude=ex_var, provider=nios_provider)[0] }}"
+    comment: Ansible place holder
+    configure_for_dns: false
+    state: present
+    provider: "{{ nios_provider }}"
+#  loop: "{{ vmware_server_static_ip[0] }}"
+  delegate_to: localhost
+
+- name: Validate That The IP Infoblox Assigned Is > 10 In Last Octet
+  assert:
+    that: (vmware_server_static_ip.split('.')[3] | int) > 10
+#  ignore_errors: yes
+
+#- name: Infoblox API - Create host record
+#  nios_host_record:
+#    name: "{{ hostname_calculated | upper }}"
+#    view: ansibleDnsView
+#    ipv4addrs:
+#      - ipv4addr: "{{ vmware_server_static_ip }}"
+#    ipv6addrs:
+#      - ipv6addr: fd00::2ttl: 3600
+#    extattrs:
+#      Site: Test Site
+#    comment: Created with Ansible
+#    state: present
+#    provider: "{{ nios_provider }}"
+
+- name: "math_vmware_networking_static: Build the portgroup name (production)"
+  set_fact:
+    vmware_dvs_portgroup_target: "{{ 'NSX_LNX_' + vmware_server_static_ip.split('.')[2] }}"
+  when:
+    - vmware_server_static_ip.split('.')[1] | int == 20
+    - survey_load_balancing == "no"
+
+- name: "math_vmware_networking_static: Build the portgroup name (non-production)"
+  set_fact:
+    vmware_dvs_portgroup_target: "{{ 'NSX_LNX_1' + vmware_server_static_ip.split('.')[2] }}"
+  when:
+    - vmware_server_static_ip.split('.')[1] | int == 22
+    - survey_load_balancing == "no"
+
+- name: "math_vmware_networking_static: Build the portgroup name (production)"
+  set_fact:
+    vmware_dvs_portgroup_target: "{{ 'NSX_LNX_LB_' + vmware_server_static_ip.split('.')[2] }}"
+  when:
+    - vmware_server_static_ip.split('.')[1] | int == 20
+    - survey_load_balancing == "yes"
+    - cag_env == "production"
+
+- name: "math_vmware_networking_static: Build the portgroup name (non-production)"
+  set_fact:
+    vmware_dvs_portgroup_target: "{{ 'NSX_LNX_LB_' + vmware_server_static_ip.split('.')[2] }}"
+  when:
+    - vmware_server_static_ip.split('.')[1] | int == 20
+    - survey_load_balancing == "yes"
+    - cag_env == "development" or cag_env == "qa"
+    - vmware_dvswitch == "vDS_CHI_NP"
+
+
+#### Perform A Ping Check To Validate If The IP Is Free
+#### ## This was intentionally left out because Ansible Tower runs the job inside the web server process
+#### ## and that process rightfully doesn't have Linux permissions to open new networking sockets. Therfore
+#### ## ping does not work via Tower. Because this might introduce knock on security issues we left this out.
+#### ## We left the code here for reference if it's needed again.
+#- command: ping -c 1 {{ vmware_server_static_ip }}
+#  check_mode: no
+#  ignore_errors: yes
+#  register: vmware_networking_assertion_ping
+#
+#- assert:
+#    that: vmware_networking_assertion_ping is failure

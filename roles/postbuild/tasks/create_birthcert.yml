@@ -1,0 +1,21 @@
+---
+- name: Set NonProd AD computer group
+  set_fact:
+    adjoin_group: NonProd
+  when:
+  - cag_env != "production"
+
+- name: Set Prod AD computer group
+  set_fact:
+    adjoin_group: Prod
+  when:
+  - cag_env == "production"
+
+- name: Set fact for SAP yes/no
+  set_fact: 
+    sap_env: "yes"
+
+- name: Create birth cert
+  ansible.builtin.shell: /sa/cua/prod/scripts/RHEL/V8.61a/create_birthcert.bash "{{ cag_snow_by_app_id.id | lower }}:{{ cag_snow_by_app_id.name | lower }}:{{ servicenow_requestor }}:{{ cag_vmware_template_name }}:{{ cag_env }}:{{ sap_env }}"
+  args:
+    executable: /usr/bin/bash

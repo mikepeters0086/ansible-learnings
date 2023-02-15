@@ -1,0 +1,111 @@
+---
+#### Datastore Calculation ####
+- name: Collect datastore information from vCenter
+  vmware_datastore_info:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    cluster: "{{ vmware_vcenter_cluster }}"
+  register: vmware_datastore_facts
+
+#### Simplified Datastore Selection Process ####
+
+- debug:
+    msg: "{{ vmware_vcenter_hostname }}; {{ vmware_vcenter_datacenter }}; {{ vmware_vcenter_cluster }}"
+
+#### VCS01 ###
+
+- name: Determine the Datastore Cluster for VMs in CEPAPPVCS01
+  set_fact:
+    vmware_vcenter_datastore_data: "{{ vmware_vcenter_cluster }}_DATA_DS" 
+  when:
+    vmware_vcenter_hostname == "cepappvcs01.cag.conagrafoods.net"
+
+### VCS02 ###
+# This handles, both Linders & ORA Servers
+- name: Determine the Datastore Cluster for VMs in CEPAPPVCS02.
+  set_fact:
+    vmware_vcenter_datastore_data: "VSI_{{ vmware_vcenter_cluster }}" 
+  when:
+    vmware_vcenter_hostname == "cepappvcs02.cag.conagrafoods.net"
+
+### VCS06 ###
+- name: Determine the Datastore Cluster for VMs in CEPAPPVCS06
+  set_fact:
+    vmware_vcenter_datastore_data: "{{ site_prefix }}_DS" 
+  when:
+    vmware_vcenter_hostname == "cepappvcs06.cag.conagrafoods.net"
+
+###################
+
+#### Build the array of disk information to feed into the create VM task
+- name: Layout the portion of the disk datastructure for the OS (non-production, not platinum)
+  set_fact:
+    vmware_disk_layout_os:
+      # OS Disk
+      - size_gb: 60
+        controller_number: 0
+        controller_type: lsilogicsas
+        datastore: "{{ vmware_vcenter_datastore_data }}"
+        type: thin
+        unit_number: 0
+      # # Data Disk
+      # - size_gb: "{{ disk_d_gb }}"
+      #   controller_number: 0
+      #   controller_type: lsilogicsas
+      #   datastore: "{{ vmware_vcenter_datastore_data }}"
+      #   type: thin
+      #   unit_number: 1
+      # Page File Disk
+      - size_gb: "{{ (1.5 * (hw_memory_gb | int)) | round | int }}"
+        controller_number: 0
+        controller_type: lsilogicsas
+        datastore: "{{ vmware_vcenter_datastore_data }}"
+        type: thin
+        unit_number: 2
+
+
+# ### SQL Server Selection Disk Details, this is based on the simplified selection criteria above ###
+# - name: Layout the portion of the disk datastructure for SQL servers
+#   set_fact:
+#     vmware_disk_layout_sql:
+#       # SQL Data
+#       - size_gb: "{{ survey_sql_data_gb | int }}"
+#         controller_number: 1
+#         controller_type: paravirtual
+#         datastore: "{{ vmware_vcenter_datastore_data }}"
+#         type: eagerzeroedthick
+#         unit_number: 0
+#       # SQL Transaction Logs
+#       - size_gb: "{{ survey_sql_tlogs_gb | int }}"
+#         controller_number: 2
+#         controller_type: paravirtual
+#         datastore: "{{ vmware_vcenter_datastore_data }}"
+#         type: eagerzeroedthick
+#         unit_number: 0
+#       # SQL TempDB
+#       - size_gb: "{{ survey_sql_tempdb_gb | int }}"
+#         controller_number: 3
+#         controller_type: paravirtual
+#         datastore: "{{ vmware_vcenter_datastore_data }}"
+#         type: eagerzeroedthick
+#         unit_number: 0
+#       # SQL TempDB Log
+#       - size_gb: "{{ survey_sql_tempdb_logs_gb | int }}"
+#         controller_number: 3
+#         controller_type: paravirtual
+#         datastore: "{{ vmware_vcenter_datastore_data }}"
+#         type: eagerzeroedthick
+#         unit_number: 1
+#       # SQL Backup
+#       - size_gb: "{{ survey_sql_backup_gb | int }}"
+#         controller_number: 0
+#         controller_type: lsilogicsas
+#         datastore: "{{ vmware_vcenter_datastore_data }}"
+#         type: thin
+#         unit_number: 3
+#   when:
+#     - cag_server_type == "sql_server"
+
+- name: Combine the layouts (default the SQL one to an empty list if necessary)
+  set_fact:
+   vmware_disk_layout: "{{ vmware_disk_layout_os }}"

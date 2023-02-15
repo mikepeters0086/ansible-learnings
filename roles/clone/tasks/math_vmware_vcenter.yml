@@ -1,0 +1,119 @@
+---
+#### vCenter Calculation ####
+- name: Set the vCenter hostname (production)
+  set_fact:
+    vmware_vcenter_hostname: cepappvcs02.cag.conagrafoods.net
+  when:
+  - cag_env == "production"
+
+- name: Set the vCenter hostname (non-production, platinum)
+  set_fact:
+    vmware_vcenter_hostname: cepappvcs02.cag.conagrafoods.net
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower == "platinum"
+
+- name: Set the vCenter hostname (non-production, not platinum)
+  set_fact:
+    vmware_vcenter_hostname: cepappvcs01.cag.conagrafoods.net
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower != "platinum"
+
+#### Datacenter Calcuation ####
+- name: Set the datacenter (production)
+  set_fact:
+    vmware_vcenter_datacenter: CHI
+  when:
+  - cag_env == "production"
+
+- name: Set the datacenter (non-production)
+  set_fact:
+    vmware_vcenter_datacenter: CHI_NProd
+  when:
+  - cag_env == "development" or cag_env == "qa"
+
+#### Cluster Calculation ####
+- name: Set the cluster (production, app or web)
+  set_fact:
+    vmware_vcenter_cluster: CPAP01
+  when:
+  - cag_env == "production"
+  - cag_server_type == "suse_application" or cag_server_type == "rhel_application" or cag_server_type == "ubn_application"
+
+- name: Set the cluster (production, sql)
+  set_fact:
+    vmware_vcenter_cluster: CPDB01
+  when:
+  - cag_env == "production"
+  - cag_server_type == "rhel_oracle"
+
+- name: Set the cluster (non-production, app or web)
+  set_fact:
+    vmware_vcenter_cluster: CNAP01
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower == "platinum"
+  - cag_server_type == "suse_application" or cag_server_type == "rhel_application" or cag_server_type == "ubn_application"
+
+- name: Set the cluster (non-production, platinum, database)
+  set_fact:
+    vmware_vcenter_cluster: CNDB01
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower == "platinum"
+  - cag_server_type == "rhel_oracle"
+
+- name: Set the cluster (non-production, not platinum, app or web)
+  set_fact:
+    vmware_vcenter_cluster: AP01
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower != "platinum"
+  - cag_server_type == "suse_application" or cag_server_type == "rhel_application" or cag_server_type == "ubn_application"
+
+- name: Set the cluster (non-production, not platinum, database)
+  set_fact:
+    vmware_vcenter_cluster: DB01
+  when:
+  - cag_env == "development" or cag_env == "qa"
+  - (by_app_id.records | first).business_criticality | string | lower != "platinum"
+  - cag_server_type == "rhel_oracle"
+
+- name: Display the determined vCenter information
+  debug:
+    msg: "{{ vmware_vcenter_hostname + ' : ' + vmware_vcenter_datacenter + ' : ' + vmware_vcenter_cluster }}"
+
+#### Calculate the VMware vCenter Folder Name
+- name: Determine the folder in vCenter (production, linux)
+  set_fact:
+    vmware_vcenter_folder: "Linux"
+  when:
+    - (cag_operating_system == "ubuntu_linux_20_04" or
+      cag_operating_system == "suse_enterprise_linux_15" or
+      cag_operating_system == "rhel_9" or
+      cag_operating_system == "rhel_86")
+    - cag_env == "production"
+
+- name: Determine the folder in vCenter (non-production, linux)
+  set_fact:
+    vmware_vcenter_folder: "Linux_NP"
+  when:
+    - (cag_operating_system == "ubuntu_linux_20_04" or
+      cag_operating_system == "suse_enterprise_linux_15" or
+      cag_operating_system == "rhel_9" or
+      cag_operating_system == "rhel_86")
+    - cag_env != "production"
+
+#### TESTING OVERLOADS ####
+- name: TESTING OVERLOAD
+  set_fact:
+    vmware_vcenter_hostname: cetappvcs01.cag.conagrafoods.net
+    vmware_vcenter_datacenter: CHI-Test
+    vmware_vcenter_cluster: CNLAB01
+  when:
+  - cag_testing_template_overload | default(False)
+
+- name: Display the determined vCenter information
+  debug:
+    msg: "{{ vmware_vcenter_hostname + ' : ' + vmware_vcenter_datacenter + ' : ' + vmware_vcenter_cluster }}"

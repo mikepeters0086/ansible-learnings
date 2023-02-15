@@ -1,0 +1,5 @@
+---
+- name: Install Tanium client
+  ansible.builtin.shell: /sa/cua/prod/scripts/RHEL/V8.61a/installTaniumClient_updated_rhel.sh
+  args:
+    executable: /usr/bin/bash

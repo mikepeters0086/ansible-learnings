@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<birth_cert>
+    <name>{{ ansible_hostname }}</name>
+    <appid>{{ cag_application_id | string }}</appid>
+    <landscape>{{ cag_env }}</landscape>
+    <dr>{{ cag_snow_by_app_id.dr }}</dr>
+    <metal>{{ cag_snow_by_app_id.metal }}</metal>
+    <builder>ansible</builder>
+    <template>{{ cag_vmware_template_name }}</template>
+    <birth_date>{{ lookup('pipe', 'date +%m/%d/%Y\\ %I:%M\\ %p') }}</birth_date>
+    <OS>{{ lookup('pipe', '/usr/bin/cat /etc/{{ ansible_distribution | lower }}-release') }}</OS>
+</birth_cert>

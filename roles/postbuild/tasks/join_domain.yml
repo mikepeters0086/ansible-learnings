@@ -1,0 +1,17 @@
+---
+- name: Set NonProd AD computer group
+  set_fact:
+    adjoin_group: NonProd
+  when:
+  - cag_env != "production"
+
+- name: Set Prod AD computer group
+  set_fact:
+    adjoin_group: Prod
+  when:
+  - cag_env == "production"
+  
+- name: Join CAG domain
+  ansible.builtin.shell: /sa/cua/prod/scripts/RHEL/V8.61a/domainjoin.bash {{ adjoin_group }}
+  args:
+    executable: /usr/bin/bash

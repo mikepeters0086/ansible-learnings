@@ -1,0 +1,11 @@
+---
+  - name: Query ServiceNow for Relevant Data
+    servicenow.itsm.configuration_item_info:
+      instance:
+        host: https://conagra.service-now.com
+        password: "{{ api_password }}"
+        username: "{{ api_username }}"
+      sys_class_name: cmdb_ci_business_app
+      query:
+        - u_application_id: "= {{ cag_application_id | string }}"
+    register: by_app_id

@@ -1,0 +1,234 @@
+---
+- name: "math_vmware_networking: All load balanced VMs must have a static IP"
+  assert:
+    that: cag_ip_type == "Static IP"
+  when: 
+  - survey_load_balancing == "Yes"
+
+- name: "math_vmware_networking: Set the distributed vSwitch (production)"
+  set_fact:
+    vmware_dvswitch: vDS_CHI_P
+  when:
+  - cag_env == "production"
+
+- name: "math_vmware_networking: Set the distributed vSwitch (non-production)"
+  set_fact:
+    vmware_dvswitch: vDS_CHI_NP
+  when:
+  - cag_env == "development" or cag_env == "qa"
+
+#### TESTING OVERLOADS ####
+- name: TESTING OVERLOAD
+  set_fact:
+    vmware_dvswitch: vDS_LAB
+  when:
+  - cag_testing_template_overload | default(False)
+#### END OF TESTING OVERLOADS ####
+
+- name: "math_vmware_networking: Gather the details on dvs portgroups from vCenter"
+  vmware_dvs_portgroup_info:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    dvswitch: "{{ vmware_dvswitch }}"
+    show_vlan_info: yes
+  delegate_to: localhost
+  register: vmware_dvs_portgroup_info_results
+
+- name: "math_vmware_networking: Drop the details about the dvswitch for this execution cycle"
+  ansible.builtin.debug:
+    var: vmware_dvs_portgroup_info_results.dvs_portgroup_info[vmware_dvswitch]
+
+#### filter the list of portgroups based on various scenarios
+- name: Transfer the portgroup info data into a data structure to be trimmed down
+  ansible.builtin.set_fact:
+    portgroups: "{{ vmware_dvs_portgroup_info_results.dvs_portgroup_info[vmware_dvswitch] }}"
+
+- name: Include only portgroups that begin with  'NSX_LNX_'
+  ansible.builtin.set_fact:
+    portgroups: >-
+      {{
+        portgroups |
+        selectattr('portgroup_name', 'match', '^NSX_LNX_') |
+        list
+      }}
+
+- name: >-
+    Load balancing is not required - remove the _LB_ named portgroups from
+    consideration
+  ansible.builtin.set_fact:
+    portgroups: >-
+      {{
+        portgroups |
+        rejectattr('portgroup_name', 'search', '_LB_') |
+        list
+      }}
+  when:
+    - survey_load_balancing == "no"
+
+- name: Load balancing is required - restrict list to only those with _LB_ in the name
+  ansible.builtin.set_fact:
+    portgroups_lb: >-
+      {{
+        portgroups |
+        selectattr('portgroup_name', 'search', '_LB_') |
+        list
+      }}
+  when:
+    - survey_load_balancing == "yes" 
+
+- name: debug portgroups
+  ansible.builtin.debug:
+    var: portgroups
+
+- name: When in 'sandbox', 'development' or 'qa' restrict portgroups those ending with '_NP'
+  ansible.builtin.set_fact:
+    portgroups: >-
+      {{
+        portgroups |
+        selectattr('portgroup_name', 'match', 'NSX_LNX_11\d\d$') |
+        list
+      }}
+  when:
+    - cag_env | lower != "production"
+
+- name: When in 'sandbox', 'development' or 'qa' removed portgroups that are load balanced
+  ansible.builtin.set_fact:
+    portgroups: >-
+      {{
+        portgroups |
+        rejectattr('portgroup_name', 'match', '.*_LB_22') |
+        list
+      }}
+  when:
+    - cag_env |lower != "production"
+
+- name: When in 'production' remove portgroups ending with 4 digits
+  ansible.builtin.set_fact:
+    portgroups: >-
+      {{
+        portgroups |
+        rejectattr('portgroup_name', 'match', '.*11\d\d$') |
+        list
+      }}
+  when:
+    - cag_env | lower == "production"
+    - survey_load_balancing == "no" 
+
+- name: >-
+    Extract VLAN IDs from trimmed list of valid portgroups based on previous
+    steps
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_list_of_vlans: >-
+      {{
+        portgroups |
+        map(attribute='vlan_info.vlan_id') |
+        list
+      }}
+#  when:
+#    - survey_load_balancing | lower == "no"
+
+- name: >-
+    Extract VLAN IDs from trimmed list of valid portgroups based on previous
+    steps for static IP selections in LB
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_list_of_vlans_static: >-
+      {{
+        portgroups_lb |
+        map(attribute='vlan_info.vlan_id') |
+        list
+      }}
+  when:
+    - survey_load_balancing | lower == "yes"
+    - cag_ip_type == "Static IP"
+
+- name: >-
+    Extract VLAN IDs from trimmed list of valid portgroups based on previous
+    steps for static IP selections
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_list_of_vlans_static: >-
+      {{
+        portgroups |
+        map(attribute='vlan_info.vlan_id') |
+        list
+      }}
+  when:
+    - survey_load_balancing | lower == "no"
+    - cag_ip_type == "Static IP"
+
+- name: "math_vmware_networking: Display the list of vlans"
+  debug:
+    var: vmware_dvs_portgroup_list_of_vlans
+
+# Adding math_vmware_networking_DHCP
+
+# This is the potential list of port groups
+- name: "math_vmware_networking_dhcp: Least utilized MS Linux DHCP scope"
+  win_shell: |
+    $Possibilities = {{ vmware_dvs_portgroup_list_of_vlans | join(',') }}
+    $Results = @()
+    ForEach ($Possibility in $Possibilities) {
+      If ($Possibility -lt 1000) {
+        $ScopeId = "172.20." + ($Possibility) + ".0"
+      } Else {
+        $ScopeId = "172.22." + ($Possibility % 1000) + ".0"
+      }
+      $Results += Get-DhcpServerv4Scope -ScopeId $ScopeId
+    }
+    $Answer = ($Results | `
+      Get-DhcpServerv4ScopeStatistics | `
+      Sort-Object Free | `
+      Select-Object ScopeId)[-1]
+    Write-Host $Answer.ScopeId
+  changed_when: false
+  check_mode: false
+  register: vmware_dhcp_results
+
+- name: When it is a 172.20/16 network the portgroup name is NSX_LNX_<vlan_id>
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_target_dhcp: >-
+      NSX_LNX_{{ vmware_dhcp_results.stdout_lines[0].split('.')[2] }}
+  when:
+    - vmware_dhcp_results.stdout_lines[0].split('.')[1] | int == 20
+    
+- name: When it is a 172.22/16 network the portgroup name is NSX_LNX_1<vlan_id>
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_target_dhcp: >-
+      NSX_LNX_1{{ vmware_dhcp_results.stdout_lines[0].split('.')[2] }}
+  when:
+    - vmware_dhcp_results.stdout_lines[0].split('.')[1] | int == 22
+
+- name: >-
+    Focus json on selected portgroup name from of valid portgroups based on previous
+    steps
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_target_key: >-
+      {{
+        portgroups |
+        selectattr('portgroup_name', 'match', vmware_dvs_portgroup_target_dhcp) |
+        list
+      }}
+
+- ansible.builtin.debug:
+    var: vmware_dvs_portgroup_target_key
+
+- name: >-
+    Extract portgroup key from trimmed list of valid portgroups based on previous
+    steps
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_target_key: >-
+      {{
+        vmware_dvs_portgroup_target_key |
+        map(attribute='key') |
+        list
+      }}
+      
+- name: Setting the vmware_dvs_portgroup_target var to prevent an error - an unnecessary variable when using DHCP
+  ansible.builtin.set_fact:
+    vmware_dvs_portgroup_target: "{{ vmware_dvs_portgroup_target_dhcp }}"
+
+# not needed due to combining DHCP and networking
+# - name: When it is a non-production VLAN append _NP to the portgroup name
+#   ansible.builtin.set_fact:
+#     vmware_dvs_portgroup_target_dhcp: >-
+#       {{ vmware_dvs_portgroup_target_dhcp }}
+#   when: cag_env != "production"

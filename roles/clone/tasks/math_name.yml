@@ -1,0 +1,95 @@
+---
+#### Calculate the VMware Template Name based on the Operating System selected
+- name: "math_name: Determine VMware Template Name - Redhat Enterprise Linux 8.6"
+  ansible.builtin.set_fact:
+    cag_vmware_template_name: OVA_RHEL-8.6
+  when:
+    - cag_operating_system == "rhel_86"
+
+- name: "math_name: Determine VMware Template Name - RedHat Enterprise Linux 9.0"
+  ansible.builtin.set_fact:
+    cag_vmware_template_name: RHEL-9.0_TEMPL-1a
+  when:
+    - cag_operating_system == "rhel_9"
+
+#### Calculate the name based on selected variables in the survey
+# <asi><ap><##><a/w/d/h><s/d/q/p>   ASI = <asi><ap>
+- name: "math_name: <asi><ap><##><a/w/d/h><S>"
+  ansible.builtin.set_fact:
+    naming_environment: s
+  when: cag_env == "sandbox"
+
+- name: "math_name: <asi><ap><##><a/w/d/h><D>"
+  ansible.builtin.set_fact:
+    naming_environment: d
+  when: cag_env == "development"
+
+- name: "math_name: <asi><ap><##><a/w/d/h><Q>"
+  ansible.builtin.set_fact:
+    naming_environment: q
+  when: cag_env == "qa"
+
+- name: "math_name: <asi><ap><##><a/w/d/h><P>"
+  ansible.builtin.set_fact:
+    naming_environment: p
+  when: cag_env == "production"
+
+- name: "math_name: <asi><ap><##><A><p/q/d/s>"
+  ansible.builtin.set_fact: 
+    naming_server_type: a
+  when: cag_server_type == "rhel_application"
+
+- name: "math_name: Create a single variable containing the name fragment so far"
+  ansible.builtin.set_fact:
+    hostname_before_numbering: "{{ cag_snow_by_app_id.asi | lower }}{{ naming_server_type }}{{ naming_environment }}"
+
+- name: "setting VMware username and pass variables"
+  ansible.builtin.set_fact:
+    domain_password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    domain_username: "{{ lookup('env', 'VMWARE_USER') }}"
+  no_log: true
+
+- name: "math_name: Via vCenter determine the next available ## for the server name"
+  win_shell: |
+      $pwdString = '{{ domain_password }}'
+      $secpasswd = ConvertTo-SecureString $pwdString -AsPlainText -Force
+      $mycreds = New-Object System.Management.Automation.PSCredential('{{ domain_username }}', $secpasswd)
+      $viconnection = Connect-VIServer cepappvcs01,cepappvcs02 -Credential $mycreds
+      $asi = "{{ cag_snow_by_app_id.asi }}"
+      $type = "{{ naming_server_type }}"
+      $env = "{{ naming_environment }}"
+      $i = 1
+      For ($i = 1; $i -lt 50; $i++) {
+        $hostname =  $asi+$i+$type+$env
+        $result = Get-VM $hostname -ErrorAction SilentlyContinue
+        if($null -eq $result){
+          Write-Host $hostname
+          Return
+        }
+        else{
+          Write-Host "$hostname exists..."
+        }
+      }
+  changed_when: false
+  check_mode: false
+  register: hostname_powershell_results
+
+- name: "math_name: display hostname_powershell_results"
+  debug:
+    var: hostname_powershell_results
+
+- name: "math_name: temp rendering of name"
+  ansible.builtin.set_fact:
+    hostname_tmp: "{{ hostname_powershell_results.stdout_lines |list |last |lower }}"
+
+- name: "store the final calculation of the entire name"
+  ansible.builtin.set_fact:
+    hostname_calculated: "{{ hostname_tmp }}"
+
+#### Testing overload
+# - force the template to the 2k19 template
+- name: TESTING OVERLOAD
+  ansible.builtin.set_fact:
+    cag_vmware_template_name: WIN2K19_GUI_ANSIBLE
+  when:
+  - cag_testing_template_overload | default(False)

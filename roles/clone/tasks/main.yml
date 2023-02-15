@@ -1,0 +1,311 @@
+---
+
+### CLONE TO VCS01
+- name: Clone the template from the content library when HCI Storage is Needed
+  community.vmware.vmware_content_deploy_ovf_template:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    validate_certs: false
+    name: "{{ hostname_calculated }}"
+    library: chi-content-library-vcs01
+    log_level: debug
+    template: "{{ cag_vmware_template_name }}"
+    cluster: "{{ vmware_vcenter_cluster }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    folder: "{{ vmware_vcenter_folder }}"
+    datastore: "{{ vmware_vcenter_datastore_data }}"
+  register: deployment
+  when:
+    - not cag_automated_testing | default(False)
+#   - cag_ip_type == "DHCP"
+    - vmware_vcenter_hostname == "cepappvcs01.cag.conagrafoods.net"
+    - site_prefix == "datacenter"
+
+### CLONE TO VCS02
+- name: Clone the template from the content library when datastore clustering is used
+  community.vmware.vmware_content_deploy_ovf_template:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    validate_certs: false
+    name: "{{ hostname_calculated }}"
+    library: vcs02-chi-content-library-vcs01
+    log_level: debug
+    template: "{{ cag_vmware_template_name }}"
+    cluster: "{{ vmware_vcenter_cluster }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    folder: "{{ vmware_vcenter_folder }}"
+    datastore_cluster: "{{ vmware_vcenter_datastore_data }}"
+  register: deployment
+  when:
+    - not cag_automated_testing | default(False)
+#    - cag_ip_type == "DHCP"
+    - vmware_vcenter_hostname == "cepappvcs02.cag.conagrafoods.net"
+    - site_prefix == "datacenter"
+
+### CLONE TO VCS06 (PLANTS)
+- name: Clone the template from the content library when in the Plants
+  community.vmware.vmware_content_deploy_ovf_template:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    validate_certs: false
+    name: "{{ hostname_calculated }}"
+    library: "{{ site_prefix }}-chi-content-library-vcs01"
+    log_level: debug
+    template: "{{ cag_vmware_template_name }}"
+    cluster: "{{ vmware_vcenter_cluster }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    folder: "{{ vmware_vcenter_folder }}"
+    datastore_cluster: "{{ vmware_vcenter_datastore_data }}"
+  register: deployment
+  when:
+    - not cag_automated_testing | default(False)
+    - cag_ip_type == "DHCP"
+    - vmware_vcenter_hostname == "cepappvcs06.cag.conagrafoods.net"
+    - site_prefix != "datacenter"
+
+### Search for the Newly cloned VM to query its vm id value for the guest customization REST calls
+- name: Search for the VM by name
+  vmware.vmware_rest.vcenter_vm_info:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    names:
+      - "{{ hostname_calculated }}"
+  delay: 15
+  register: vm
+  retries: 180
+  until:
+    - vm.value | length > 0
+
+- name: Set a fact for the VM ID from VMware
+  ansible.builtin.set_fact:
+    vm_id: "{{ vm.value[0].vm }}"
+  ignore_errors: yes
+
+### DO CPU & Memory Changes ###
+- name: Configure the Requested Memory
+  vmware.vmware_rest.vcenter_vm_hardware_memory:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    vm: '{{ vm_id }}'
+    size_MiB: "{{ hw_memory_gb | int * 1024 }}"
+    hot_add_enabled: yes
+
+- name: Configure the Requested CPUs
+  vmware.vmware_rest.vcenter_vm_hardware_cpu:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    vm: '{{ vm_id }}'
+    count: "{{ hw_num_cpus}}"
+    cores_per_socket: "{{ (hw_num_cpus / 2 | int) | int }}"
+    hot_add_enabled: no
+    hot_remove_enabled: no
+
+- name: Apply guest customization for Linux
+  vmware.vmware_rest.vcenter_vm_guest_customization:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    vm: "{{ vm_id }}"
+    configuration_spec:
+      linux_config:
+        domain: cag.conagrafoods.net
+        hostname: 
+          fixed_name: "{{ hostname_calculated }}"
+          type: FIXED
+        time_zone: "America/Chicago"
+    interfaces:
+      - adapter:
+          ipv4:
+            type: DHCP
+    global_DNS_settings:
+      dns_suffix_list:
+        - cag.conagrafoods.net
+      dns_servers:
+        - 172.20.146.166
+        - 172.20.146.167
+        - 172.18.3.4
+
+
+# - name: Apply the guest customization specification
+#   vmware.vmware_rest.vcenter_vm_guest_customization:
+#     vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+#     vm: "{{ vm_id }}"
+#     configuration_spec:
+#       windows_config:
+#         reboot: REBOOT
+#         sysprep:
+#           domain:
+#             domain: cag.conagrafoods.net
+#             domain_password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+#             domain_username: "{{ lookup('env', 'VMWARE_USER') }}"
+#             type: DOMAIN
+#           # gui_run_once_commands:
+#           #   - >-
+#           #     powershell
+#           #     "Add-LocalGroupMember
+#           #     -Group Administrators
+#           #     -Member 'CAG\ACE-Enterprise Service Accounts'"
+#           gui_unattended:
+#             auto_logon: true
+#             auto_logon_count: 1
+#             password: "{{ ansible_password }}"
+#             time_zone: 20
+#           user_data:
+#             computer_name:
+#               type: VIRTUAL_MACHINE
+#             full_name: Conagra Brands
+#             product_key: ""
+#             organization: Conagra Brands
+#     # global_DNS_settings:
+#     #   dns_suffix_list:
+#     #     - cag.conagrafoods.net
+#     #   dns_servers:
+#     #     - 172.20.146.166
+#     #     - 172.20.146.167
+#     #     - 172.18.3.4
+#     interfaces:
+#       - adapter:
+#           ipv4:
+#             type: DHCP
+
+# - name: debug disk_d_gb
+#   ansible.builtin.debug:
+#     var: disk_d_gb
+
+# - name: Get the hard disk information
+#   vmware.vmware_rest.vcenter_vm_hardware_disk_info:
+#     vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+#     vm: "{{ vm_id }}"
+#   register: disks
+
+# - name: Add the data disk
+#   vmware.vmware_rest.vcenter_vm_hardware_disk:
+#     vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+#     new_vmdk:
+#       name: "{{ hostname_calculated | upper }}_data"
+#       capacity: "{{ ((disk_d_gb | int) * 1024 ** 3) }}"
+#     scsi:
+#       bus: 0
+#       unit: 1
+#     type: SCSI
+#     vm: "{{ vm_id }}"
+#   register: d_data
+
+# - ansible.builtin.debug:
+#     var: d_data
+
+- name: Add the swapfile disk
+  vmware.vmware_rest.vcenter_vm_hardware_disk:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    new_vmdk:
+      name: "{{ hostname_calculated }}_pagefile"
+      capacity: "{{ (((1.5 * hw_memory_gb) * 1024 ** 3) | int) }}"
+    scsi:
+      bus: 0
+      unit: 2
+    type: SCSI
+    vm: "{{ vm_id }}"
+  register: d_swapfile
+
+- ansible.builtin.debug:
+    var: d_swapfile
+
+- name: Add the SQL SCSI controllers
+  vmware.vmware_rest.vcenter_vm_hardware_adapter_scsi:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    bus: "{{ controller.bus }}"
+    type: PVSCSI
+    vm: "{{ vm_id }}"
+  loop:
+    - bus: 1
+    - bus: 2
+    - bus: 3
+  loop_control:
+    loop_var: controller
+  when:
+    - cag_server_type == "sql_server"
+
+# Cannot use the new methods to add the other disks because the REST API does
+# not currently support setting the disks to be eager zeroed thick provision.
+- name: Add the SQL backup disk
+  vmware.vmware_rest.vcenter_vm_hardware_disk:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    new_vmdk:
+      name: "{{ hostname_calculated }}_{{ disk.suffix }}"
+      capacity: "{{ disk.capacity }}"
+    scsi:
+      bus: "{{ disk.bus }}"
+      unit: "{{ disk.unit }}"
+    type: SCSI
+    vm: "{{ vm_id }}"
+  loop:
+    - bus: 0
+      capacity: "{{ ((survey_sql_backup_gb | int) * 1024 ** 3) | int }}"
+      suffix: backup
+      unit: 3
+  loop_control:
+    loop_var: disk
+  when:
+    - cag_server_type == "sql_server"
+
+- name: >-
+    Add the remaining SQL data disks using community.vmware
+    (thick-provisioning)
+  community.vmware.vmware_guest_disk:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    datacenter: "{{ vmware_vcenter_datacenter }}"
+    disk:
+      - scsi_controller: 1
+        size_gb: "{{ survey_sql_data_gb | int  }}"
+        type: eagerzeroedthick
+        unit_number: 0
+      - scsi_controller: 2
+        size_gb: "{{ survey_sql_tlogs_gb | int  }}"
+        type: eagerzeroedthick
+        unit_number: 0
+      - scsi_controller: 3
+        size_gb: "{{ survey_sql_tempdb_gb | int  }}"
+        type: eagerzeroedthick
+        unit_number: 0
+      - scsi_controller: 3
+        size_gb: "{{ survey_sql_tempdb_logs_gb | int  }}"
+        type: eagerzeroedthick
+        unit_number: 1
+    name: "{{ hostname_calculated }}"
+  when: 
+  - cag_server_type == "sql_server"
+
+- name: Get the distributed portgroup information
+  vmware.vmware_rest.vcenter_network_info:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    filter_types: DISTRIBUTED_PORTGROUP
+    filter_names: "{{ vmware_dvs_portgroup_target_dhcp }}"
+    networks: "{{ vmware_dvs_portgroup_target_key }}"
+  register: portgroup
+
+- name: Get The NIC Information
+  vmware.vmware_rest.vcenter_vm_hardware_ethernet_info:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    vm: "{{ vm_id }}"
+  register: nic
+
+- name: Set The Portgroup On The NIC
+  vmware.vmware_rest.vcenter_vm_hardware_ethernet:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    backing:
+      type: DISTRIBUTED_PORTGROUP
+      network: "{{ portgroup.value[0].network }}"
+    nic: "{{ nic.value[0].nic }}"
+    # start_connected: true
+    type: VMXNET3
+    vm: "{{ vm_id }}"
+
+- name: Add tags to the newly created VM
+  community.vmware.vmware_tag_manager:
+    hostname: "{{ vmware_vcenter_hostname }}"
+    tag_names:
+      - "cag-ApplicationID:{{ cag_application_id | string }}"
+      - "cag-Environment:{{ cag_env | string | upper }}"
+      - "cag-MetalTier:{{ cag_snow_by_app_id.metal | string | capitalize }}"
+      - "cag-DisasterRecoveryTier:{{ cag_snow_by_app_id.dr | string }}"
+    object_name: "{{ hostname_calculated }}"
+    object_type: VirtualMachine
+    state: present
+
+- name: Power The VM On
+  vmware.vmware_rest.vcenter_vm_power:
+    vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+    state: start
+    vm: "{{ vm_id }}"
