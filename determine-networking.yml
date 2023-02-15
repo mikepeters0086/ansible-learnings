@@ -1,0 +1,41 @@
+---
+# Select a single host from all at random, this should be targetted at hosts
+# that are able to run at least 'Get-DhcpServerv4Scope' in PowerShell.
+- hosts: "{{ groups.all | random }}"
+
+  tasks:
+    - name: Run the existing math_vmware_networking logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: math_vmware_networking
+
+    # - name: Run the existing math_vmware_networking_dhcp logic
+    #   ansible.builtin.include_role:
+    #     name: clone
+    #     tasks_from: math_vmware_networking_dhcp
+#      when:
+#        - cag_ip_type == "DHCP"
+
+    - name: Run the existing math_vmware_networking_static logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: math_vmware_networking_static
+      when:
+        - cag_ip_type == "Static IP"
+
+  post_tasks:
+    - name: Push the portgroup up to the workflow stats to be consumed elsewhere
+      ansible.builtin.set_stats:
+        aggregate: true
+        data:
+          vmware_dvs_portgroup_target: "{{ vmware_dvs_portgroup_target }}"
+          vmware_dvs_portgroup_target_dhcp: "{{ vmware_dvs_portgroup_target_dhcp }}"
+          vmware_dvs_portgroup_target_key: "{{ vmware_dvs_portgroup_target_key }}"
+          vmware_networking_ideal_network: "{{ vmware_networking_ideal_network | default(omit) }}"
+          vmware_server_static_ip: "{{ vmware_server_static_ip | default(omit) }}"
+
+  vars:
+    nios_provider:
+      host: "{{ nios_host }}"
+      username: "{{ nios_user }}"
+      password: "{{ nios_pass }}"

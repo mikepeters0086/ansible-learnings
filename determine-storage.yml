@@ -1,0 +1,21 @@
+
+---
+- name: Clone VM from Template
+  hosts: localhost
+
+  collections:
+    - community.vmware
+
+  tasks:
+    - name: Run the existing math_vmware_storage logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: math_vmware_storage
+
+  post_tasks:
+    - name: Push the Datastore Name up to the workflow stats to be consumed elsewhere
+      ansible.builtin.set_stats:
+        aggregate: true
+        data:
+          vmware_vcenter_datastore_data: "{{ vmware_vcenter_datastore_data }}"
+          vmware_disk_layout: "{{ vmware_disk_layout }}"

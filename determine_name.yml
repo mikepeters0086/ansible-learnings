@@ -1,0 +1,27 @@
+---
+# Select a single host from all at random, this should be targetted at hosts
+# that are able to run at least 'Get-ADComputer' in PowerShell.
+- hosts: "{{ groups.all | random }}"
+
+  tasks:
+    #- name: Run the existing math_vmware_vcenter logic
+    #  ansible.builtin.include_role:
+    #    name: clone
+    #    tasks_from: math_vmware_vcenter
+
+    - name: Run the existing math_name logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: math_name
+
+  post_tasks:
+    - name: Push the name up to the workflow stats to be consumed elsewhere
+      ansible.builtin.set_stats:
+        aggregate: true
+        data:
+          cag_vmware_template_name: "{{ cag_vmware_template_name }}"
+          hostname_calculated: "{{ hostname_tmp }}"
+          #vmware_vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+          #vmware_vcenter_datacenter: "{{ vmware_vcenter_datacenter }}"
+          #vmware_vcenter_cluster: "{{ vmware_vcenter_cluster }}"
+          #vmware_vcenter_folder: "{{ vmware_vcenter_folder }}"

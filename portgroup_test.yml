@@ -1,0 +1,14 @@
+---
+- hosts: "{{ hostname_calculated }}"
+#- hosts: "cuaxx1ad"
+  tasks:
+  - name: Set The Portgroup On The NIC
+    vmware.vmware_rest.vcenter_vm_hardware_ethernet:
+      vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+      backing:
+        type: DISTRIBUTED_PORTGROUP
+        network: "{{ portgroup.value[0].network }}"
+      nic: "{{ nic.value[0].nic }}"
+      # start_connected: true
+      type: VMXNET3
+      vm: "{{ vm_id }}"

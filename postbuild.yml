@@ -1,0 +1,20 @@
+---
+- hosts: "{{ hostname_calculated }}"
+
+  tasks:
+    - name: Create Birth certificate on new server
+      ansible.builtin.include_role:
+        name: postbuild
+        tasks_from: birthcert
+
+    - name: Join Domain during postbuild
+      ansible.builtin.include_role:
+        name: postbuild
+        tasks_from: join_domain
+      
+    - name: Install Tanium Client
+      ansible.builtin.include_role:
+        name: postbuild
+        tasks_from: installTanium
+
+

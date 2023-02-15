@@ -1,0 +1,26 @@
+---
+- name: Clone VM from Template
+  hosts: localhost
+
+  collections:
+    - ansible.netcommon
+    - community.vmware
+    - community.windows
+    - community.general
+
+  vars:
+    hw_memory_mb: "{{ 1024 * (hw_memory_gb | int) }}"
+    cpu_cores_per_socket: "{{ (hw_num_cpus / 2 | int) | int }}"
+
+  roles:
+    - role: clone
+
+  post_tasks:
+    - name: Push the useful stats up to the other workflows
+      ansible.builtin.set_stats:
+        aggregate: true
+        data:
+#          d_data: "{{ d_data }}"
+#          d_pagefile: "{{ d_pagefile }}"
+          hw_memory_mb: "{{ 1024 * (hw_memory_gb | int) }}"
+          cpu_cores_per_socket: "{{ (hw_num_cpus / 2 | int) | int }}"

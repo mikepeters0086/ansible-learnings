@@ -1,0 +1,41 @@
+# Select a single host from all at random, this should be targetted at hosts
+# test edit
+---
+- hosts: localhost
+  connection: local
+
+  tasks:
+  # ServiceNow Task is Required before the vCenter Lookup
+    - name: Run the existing service-now-appid-lookup logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: service_now_appid_lookup
+
+    
+    - name: Run the existing math_vmware_vcenter logic
+      ansible.builtin.include_role:
+        name: clone
+        tasks_from: math_vmware_vcenter
+
+  post_tasks:
+    - name: Push the name up to the workflow stats to be consumed elsewhere
+      ansible.builtin.set_stats:
+        aggregate: true
+        data:
+          vmware_vcenter_hostname: "{{ vmware_vcenter_hostname }}"
+          vmware_vcenter_datacenter: "{{ vmware_vcenter_datacenter }}"
+          vmware_vcenter_cluster: "{{ vmware_vcenter_cluster }}"
+          vmware_vcenter_folder: "{{ vmware_vcenter_folder }}"
+          servicenow_requestor: "{{ servicenow_requestor }}"
+          site_prefix: "{{ site_prefix }}"
+          cag_snow_by_app_id:
+            asi: >-
+              {{ (by_app_id.records | first).u_asi | string }}
+            dr: >-
+              {{ (by_app_id.records | first).emergency_tier | string }}
+            id: >-
+              {{ (by_app_id.records | first).u_application_id | string }}
+            metal: >-
+              {{ (by_app_id.records | first).business_criticality | string }}
+            name: >-
+              {{ (by_app_id.records | first).name | string }}

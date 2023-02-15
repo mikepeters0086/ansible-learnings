@@ -1,0 +1,13 @@
+---
+- hosts: "cuaxx1ad"
+
+  tasks:
+    - name: Create Birth certificate on new server
+      ansible.builtin.include_role:
+        name: postbuild
+        tasks_from: birthcert
+        
+
+    
+
+
